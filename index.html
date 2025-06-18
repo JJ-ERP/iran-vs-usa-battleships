@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Iran vs USA Battleship Minigame</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #222;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 0;
+    padding: 20px;
+    user-select: none;
+  }
+  h1 {
+    margin-bottom: 10px;
+  }
+  .boards {
+    display: flex
+    gap: 40px;
+    margin-top: 20px;
+  }
+  .board {
+    display: grid;
+    grid-template-columns: repeat(10, 30px);
+    grid-template-rows: repeat(10, 30px);
+    gap: 2px;
+    background: #444;
+    padding: 5px;
+    border-radius: 5px;
+  }
+  .cell {
+    width: 30px;
+    height: 30px;
+    background: #666;
+    border-radius: 3px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .cell:hover {
+    background: #888;
+  }
+  .cell.ship {
+    background: #0b5d0b; /* hidden from player, ships not visible */
+  }
+  .cell.hit {
+    background: red;
+  }
+  .cell.miss {
+    background: #222;
+  }
+  .cell.sunk {
+    background: darkred;
+  }
+  .label {
+    text-align: center;
+    font-weight: bold;
+    margin-bottom: 5px;
+  }
+  #status {
+    margin-top: 20px;
+    font-size: 1.2em;
+  }
+  #restartBtn {
+    margin-top: 20px;
+    padding: 8px 16px;
+    font-size: 1em;
+    cursor: pointer;
+    border-radius: 5px;
+    border: none;
+    background: #0066cc;
+    color: white;
+  }
+  #restartBtn:hover {
+    background: #005bb5;
+  }
+</style>
+</head>
+<body>
+
+<h1>Iran vs USA Battleship</h1>
+
+<div class="boards">
+  <div>
+    <div class="label">Iran's Board (You)</div>
+    <div id="iranBoard" class="board"></div>
+  </div>
+  <div>
+    <div class="label">USA's Board (Enemy)</div>
+    <div id="usaBoard" class="board"></div>
+  </div>
+</div>
+
+<div id="status">Your turn to attack USA's ships.</div>
+<button id="restartBtn" style="display:none;">Restart Game</button>
+
+<script>
+  const BOARD_SIZE = 10;
+  const SHIPS = [
+    {name: "Carrier", size: 5},
+    {name: "Battleship", size: 4},
+    {name: "Cruiser", size: 3},
+    {name: "Submarine", size: 3},
+    {name: "Destroyer", size: 2}
+  ];
+
+  let iranBoard = [];
+  let usaBoard = [];
+  let iranShips = [];
+  let usaShips = [];
+  let gameOver = false;
+  let playerTurn = true; // player attacks USA, then USA attacks player
+
+  const iranBoardEl = document.getElementById('iranBoard');
+  const usaBoardEl = document.getElementById('usaBoard');
+  const statusEl = document.getElementById('status');
+  const restartBtn = document.getElementById('restartBtn');
+
+  // Initialize empty boards
+  function createEmptyBoard() {
+    return Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+  }
+
+  // Randomly place ships on board
+  function placeShipsRandomly(board) {
+    let ships = [];
+    for (const ship of SHIPS) {
+      let placed = false;
+      while (!placed) {
+        const horizontal = Math.random() < 0.5;
+        const row = Math.floor(Math.random() * BOARD_SIZE);
+        const col = Math.floor(Math.random() * BOARD_SIZE);
+
+        if (canPlaceShip(board, row, col, ship.size, horizontal)) {
+          const coords = [];
+          for (let i = 0; i < ship.size; i++) {
+            const r = row + (horizontal ? 0 : i);
+            const c = col + (horizontal ? i : 0);
+            board[r][c] = ship.name[0]; // mark ship presence by first letter
+            coords.push({r, c, hit: false});
+          }
+          ships.push({name: ship.name, size: ship.size, coords});
+          placed = true;
+        }
+      }
+    }
+    return ships;
+  }
+
+  function canPlaceShip(board, row, col, size, horizontal) {
+    if (horizontal) {
+      if (col + size > BOARD_SIZE) return false;
+      for (let i = 0; i < size; i++) {
+        if (board[row][col + i] !== null) return false;
+      }
+    } else {
+      if (row + size > BOARD_SIZE) return false;
+      for (let i = 0; i < size; i++) {
+        if (board[row + i][col] !== null) return false;
+      }
+    }
+    return true;
+  }
+
+  // Render board for player view
+  function renderBoard(boardEl, board, showShips) {
+    boardEl.innerHTML = '';
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        const cell = document.createElement('div');
+        cell.classList.add('cell');
+        cell.dataset.row = r;
+        cell.dataset.col = c;
+
+        const cellVal = board[r][c];
+        if (cellVal === 'hit') cell.classList.add('hit');
+        else if (cellVal === 'miss') cell.classList.add('miss');
+        else if (cellVal === 'sunk') cell.classList.add('sunk');
+        else if (showShips && cellVal !== null) cell.classList.add('ship');
+
+        boardEl.appendChild(cell);
+      }
+    }
+  }
+
+  // Check if all ships sunk
+  function allShipsSunk(ships) {
+    return ships.every(ship => ship.coords.every(coord => coord.hit));
+  }
+
+  // Mark ship cells as sunk on board
+  function markSunkShipOnBoard(board, ship) {
+    ship.coords.forEach(({r,c}) => {
+      board[r][c] = 'sunk';
+    });
+  }
+
+  // Player attacks USA board
+  function playerAttack(row, col) {
+    if (gameOver || !playerTurn) return;
+
+    if (usaBoard[row][col] === 'hit' || usaBoard[row][col] === 'miss' || usaBoard[row][col] === 'sunk') {
+      statusEl.textContent = "You already attacked there. Choose another spot.";
+      return;
+    }
+
+    let hitShip = null;
+    for (const ship of usaShips) {
+      const coord = ship.coords.find(c => c.r === row && c.c === col);
+      if (coord && !coord.hit) {
+        coord.hit = true;
+        usaBoard[row][col] = 'hit';
+        hitShip = ship;
+        break;
+      }
+    }
+    if (!hitShip) {
+      usaBoard[row][col] = 'miss';
+      statusEl.textContent = "Miss! USA's turn.";
+    } else {
+      statusEl.textContent = `Hit! You hit USA's ${hitShip.name}.`;
+      // Check if sunk
+      if (hitShip.coords.every(c => c.hit)) {
+        markSunkShipOnBoard(usaBoard, hitShip);
+        statusEl.textContent = `You sunk USA's ${hitShip.name}!`;
+      }
+    }
+
+    renderBoard(usaBoardEl, usaBoard, false);
+
+    if (allShipsSunk(usaShips)) {
+      statusEl.textContent = "You won! USA's fleet is destroyed.";
+      gameOver = true;
+      restartBtn.style.display = 'inline-block';
+      return;
+    }
+
+    if (!hitShip) {
+      playerTurn = false;
+      setTimeout(usaAttack, 1000);
+    }
+  }
+
+  // USA attacks Iran randomly (simple AI)
+  function usaAttack() {
+    if (gameOver) return;
+
+    let row, col;
+    do {
+      row = Math.floor(Math.random() * BOARD_SIZE);
+      col = Math.floor(Math.random() * BOARD_SIZE);
+    } while (iranBoard[row][col] === 'hit' || iranBoard[row][col] === 'miss' || iranBoard[row][col] === 'sunk');
+
+    let hitShip = null;
+    for (const ship of iranShips) {
+      const coord = ship.coords.find(c => c.r === row && c.c === col);
+      if (coord && !coord.hit) {
+        coord.hit = true;
+        iranBoard[row][col] = 'hit';
+        hitShip = ship;
+        break;
+      }
+    }
+    if (!hitShip) {
+      iranBoard[row][col] = 'miss';
+      statusEl.textContent = "USA missed! Your turn.";
+    } else {
+      statusEl.textContent = `USA hit your ${hitShip.name}!`;
+      if (hitShip.coords.every(c => c.hit)) {
+        markSunkShipOnBoard(iranBoard, hitShip);
+        statusEl.textContent = `USA sunk your ${hitShip.name}! Your turn.`;
+      }
+    }
+
+    renderBoard(iranBoardEl, iranBoard, true);
+
+    if (allShipsSunk(iranShips)) {
+      statusEl.textContent = "You lost! Iran's fleet is destroyed.";
+      gameOver = true;
+      restartBtn.style.display = 'inline-block';
+      return;
+    }
+
+    if (!hitShip) {
+      playerTurn = true;
+      statusEl.textContent = "Your turn to attack USA's ships.";
+    } else {
+      setTimeout(usaAttack, 1000); // USA tries again if hit
+    }
+  }
+
+  // Setup game
+  function setupGame() {
+    iranBoard = createEmptyBoard();
+    usaBoard = createEmptyBoard();
+
+    iranShips = placeShipsRandomly(iranBoard);
+    usaShips = placeShipsRandomly(usaBoard);
+
+    renderBoard(iranBoardEl, iranBoard, true);
+    renderBoard(usaBoardEl, usaBoard, false);
+
+    statusEl.textContent = "Your turn to attack USA's ships.";
+    restartBtn.style.display = 'none';
+    gameOver = false;
+    playerTurn = true;
+  }
+
+  // Add click listeners to USA board cells for player attacks
+  usaBoardEl.addEventListener('click', (e) => {
+    if (!playerTurn || gameOver) return;
+    if (!e.target.classList.contains('cell')) return;
+    const row = parseInt(e.target.dataset.row);
+    const col = parseInt(e.target.dataset.col);
+    playerAttack(row, col);
+  });
+
+  restartBtn.addEventListener('click', () => {
+    setupGame();
+  });
+
+  setupGame();
+
+</script>
+
+</body>
+</html>
